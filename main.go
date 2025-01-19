@@ -64,9 +64,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	// Prepare the response
 	var response strings.Builder
-	response.WriteString(fmt.Sprintf("Node Name              : %s\n", nodeName))
-	response.WriteString(fmt.Sprintf("Pod Name               : %s\n", podName))
-	response.WriteString(fmt.Sprintf("Hostname               : %s\n", hostname))
+	if nodeName != "" {
+		response.WriteString(fmt.Sprintf("Node Name              : %s\n", nodeName))
+	}
+	if podName != "" {
+		response.WriteString(fmt.Sprintf("Pod Name               : %s\n", podName))
+	}
+	if hostname != "" {
+		response.WriteString(fmt.Sprintf("Hostname               : %s\n", hostname))
+	}
 	response.WriteString(fmt.Sprintf("Destination Address    : %s\n", destinationAddress))
 	response.WriteString(fmt.Sprintf("Full URL               : %s\n", requestedURL))
 
