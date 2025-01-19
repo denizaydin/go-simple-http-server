@@ -47,9 +47,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		destinationAddress = "unknown"
 	}
 
-	// Get the source address and port
-	sourceAddress := r.RemoteAddr
-
 	// Get the full requested URL
 	requestedURL := fmt.Sprintf("http://%s%s", r.Host, r.RequestURI)
 
@@ -67,20 +64,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	// Prepare the response
 	var response strings.Builder
-
-	// Conditionally include Node Name, Pod Name, and Hostname
-	if nodeName != "" {
-		response.WriteString(fmt.Sprintf("Node Name              : %s\n", nodeName))
-	}
-	if podName != "" {
-		response.WriteString(fmt.Sprintf("Pod Name               : %s\n", podName))
-	}
-	if hostname != "" {
-		response.WriteString(fmt.Sprintf("Hostname               : %s\n", hostname))
-	}
-
+	response.WriteString(fmt.Sprintf("Node Name              : %s\n", nodeName))
+	response.WriteString(fmt.Sprintf("Pod Name               : %s\n", podName))
+	response.WriteString(fmt.Sprintf("Hostname               : %s\n", hostname))
 	response.WriteString(fmt.Sprintf("Destination Address    : %s\n", destinationAddress))
-	response.WriteString(fmt.Sprintf("Source Address         : %s\n", sourceAddress))
 	response.WriteString(fmt.Sprintf("Full URL               : %s\n", requestedURL))
 
 	// Add incoming HTTP headers
@@ -109,24 +96,25 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(response.String()))
 }
 
-// parseAddressPort extracts the address and port from a combined address:port string.
-func parseAddressPort(addr string) (string, string) {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		// Return the entire addr as the host and an empty port if parsing fails
-		return addr, ""
-	}
-	return host, port
-}
-
 func main() {
 	http.HandleFunc("/", handler)
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = defaultPort
 	}
-	log.Printf("Starting server on port %s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+
+	ipMode := os.Getenv("IP_MODE")
+	var listenAddr string
+	switch ipMode {
+	case "ipv4":
+		listenAddr = "0.0.0.0:" + port
+	case "ipv6":
+		listenAddr = "[::]:" + port
+	default:
+		listenAddr = ":" + port
+	}
+	log.Printf("Starting server on %s with IP mode %s", listenAddr, ipMode)
+	if err := http.ListenAndServe(listenAddr, nil); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
 }
