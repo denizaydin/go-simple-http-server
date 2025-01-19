@@ -119,8 +119,21 @@ func main() {
 	default:
 		listenAddr = ":" + port
 	}
-	log.Printf("Starting server on %s with IP mode %s", listenAddr, ipMode)
-	if err := http.ListenAndServe(listenAddr, nil); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
-	}
+    // Create a TCP listener explicitly for IPv4
+    if ipMode == "ipv4" {
+        listener, err := net.Listen("tcp4", listenAddr)
+        if err != nil {
+            log.Fatalf("Failed to start IPv4 listener: %v", err)
+        }
+        log.Printf("Starting server on %s with IP mode %s", listenAddr, ipMode)
+        if err := http.Serve(listener, nil); err != nil {
+            log.Fatalf("Server failed: %v", err)
+        }
+    } else {
+        log.Printf("Starting server on %s with IP mode %s", listenAddr, ipMode)
+        if err := http.ListenAndServe(listenAddr, nil); err != nil {
+            log.Fatalf("Server failed: %v", err)
+        }
+    }
+
 }
