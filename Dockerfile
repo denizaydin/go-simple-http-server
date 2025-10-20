@@ -18,8 +18,7 @@ COPY . .
 
 # Statik, küçük binary oluştur
 ENV CGO_ENABLED=0
-RUN go build -trimpath -ldflags "-s -w" -o /src/go-simple-http-server ./go-simpl
-e-http-server.go
+RUN go build -trimpath -ldflags "-s -w" -o /src/go-simple-http-server ./go-simple-http-server.go
 
 ########################################
 # 2️⃣ Runtime stage
