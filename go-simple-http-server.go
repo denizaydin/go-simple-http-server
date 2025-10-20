@@ -14,16 +14,14 @@ import (
 )
 
 type HopInfo struct {
-	NodeName          string              `json:"node_name"`
-	PodName           string              `json:"pod_name"`
-	Hostname          string              `json:"hostname"`
-	RequestSourceIP   string              `json:"request_source_ip"`
-	RequestSourcePort string              `json:"request_source_port"`
-	RequestDestIP     string              `json:"request_destination_ip"`
-	RequestDestPort   string              `json:"request_destination_port"`
-	RequestURL        string              `json:"request_url"`
-	IncomingHeaders   map[string][]string `json:"incoming_headers"`
-	Timestamp         string              `json:"ts"`
+	NodeName        string              `json:"node_name"`
+	PodName         string              `json:"pod_name"`
+	Hostname        string              `json:"hostname"`
+	RequestSourceIP string              `json:"request_source_addr"`
+	RequestDestIP   string              `json:"request_destination_addr"`
+	RequestURL      string              `json:"request_url"`
+	IncomingHeaders map[string][]string `json:"incoming_headers"`
+	Timestamp       string              `json:"ts"`
 }
 
 func getenv(key, def string) string {
