@@ -14,50 +14,23 @@ import (
 )
 
 type HopInfo struct {
-	NodeName        string              `json:"node_name"`
-	PodName         string              `json:"pod_name"`
-	Hostname        string              `json:"hostname"`
-	RequestSourceIP string              `json:"request_source_ip"`
-	RequestDestIP   string              `json:"request_destination_ip"`
-	RequestURL      string              `json:"request_url"`
-	IncomingHeaders map[string][]string `json:"incoming_headers"`
-	Timestamp       string              `json:"ts"`
+	NodeName          string              `json:"node_name"`
+	PodName           string              `json:"pod_name"`
+	Hostname          string              `json:"hostname"`
+	RequestSourceIP   string              `json:"request_source_ip"`
+	RequestSourcePort string              `json:"request_source_port"`
+	RequestDestIP     string              `json:"request_destination_ip"`
+	RequestDestPort   string              `json:"request_destination_port"`
+	RequestURL        string              `json:"request_url"`
+	IncomingHeaders   map[string][]string `json:"incoming_headers"`
+	Timestamp         string              `json:"ts"`
 }
-
-// --- Helper functions ---
 
 func getenv(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
 	return def
-}
-
-func getSourceIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
-func getDestIP(r *http.Request) string {
-	la := r.Context().Value(http.LocalAddrContextKey)
-	if la == nil {
-		return ""
-	}
-	if addr, ok := la.(net.Addr); ok {
-		host, _, err := net.SplitHostPort(addr.String())
-		if err != nil {
-			return addr.String()
-		}
-		return host
-	}
-	return ""
 }
 
 func detectScheme(r *http.Request) string {
@@ -71,8 +44,7 @@ func detectScheme(r *http.Request) string {
 }
 
 func fullRequestURL(r *http.Request) string {
-	scheme := detectScheme(r)
-	return fmt.Sprintf("%s://%s%s", scheme, r.Host, r.URL.RequestURI())
+	return fmt.Sprintf("%s://%s%s", detectScheme(r), r.Host, r.URL.RequestURI())
 }
 
 func copyHeaders(h http.Header) map[string][]string {
@@ -85,19 +57,26 @@ func copyHeaders(h http.Header) map[string][]string {
 
 func buildSelfHop(r *http.Request) HopInfo {
 	hostname, _ := os.Hostname()
+	srcAddress := r.RemoteAddr
+	dstAddress := ""
+
+	la := r.Context().Value(http.LocalAddrContextKey)
+	if la != nil {
+		dstAddress = la.(net.Addr).String()
+	}
+
 	return HopInfo{
 		NodeName:        getenv("NODE_NAME", ""),
 		PodName:         getenv("POD_NAME", ""),
 		Hostname:        hostname,
-		RequestSourceIP: getSourceIP(r),
-		RequestDestIP:   getDestIP(r),
+		RequestSourceIP: srcAddress,
+		RequestDestIP:   dstAddress,
 		RequestURL:      fullRequestURL(r),
 		IncomingHeaders: copyHeaders(r.Header),
 		Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
 	}
 }
 
-// normalize target (add http/https if missing)
 func normalizeTargetURL(raw string) (string, error) {
 	if raw == "" {
 		return "", errors.New("empty target url")
@@ -108,12 +87,12 @@ func normalizeTargetURL(raw string) (string, error) {
 	}
 	scheme := "http"
 	hp := raw
-	if strings.Contains(hp, ":") && !strings.HasPrefix(hp, "[") {
-		hpNoPath := hp
-		if i := strings.Index(hp, "/"); i >= 0 {
-			hpNoPath = hp[:i]
-		}
-		if _, port, err := net.SplitHostPort(hpNoPath); err == nil && port == "443" {
+	hpOnly := hp
+	if i := strings.Index(hp, "/"); i >= 0 {
+		hpOnly = hp[:i]
+	}
+	if strings.Contains(hpOnly, ":") && !strings.HasPrefix(hpOnly, "[") {
+		if _, port, err := net.SplitHostPort(hpOnly); err == nil && port == "443" {
 			scheme = "https"
 		}
 	}
@@ -149,8 +128,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// --- Handlers ---
-
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/healthz" {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -176,7 +153,6 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
 	chain = append(chain, self)
 	writeJSON(w, http.StatusOK, chain)
 }
@@ -187,34 +163,36 @@ func main() {
 	mux.HandleFunc("/healthz", rootHandler)
 
 	port := getenv("PORT", "8080")
-	ipMode := strings.ToLower(getenv("IP_MODE", "dual"))
+	ipMode := strings.ToLower(getenv("IP_MODE", ""))
 
 	addr := ":" + port
+	var (
+		network  string
+		listener net.Listener
+		err      error
+	)
+
 	switch ipMode {
 	case "ipv4":
 		addr = "0.0.0.0:" + port
+		network = "tcp4"
 	case "ipv6":
 		addr = "[::]:" + port
+		network = "tcp6"
 	default:
-		addr = ":" + port
+		log.Printf("Starting server on %s (default stack)", addr)
+		if err = http.ListenAndServe(addr, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("server failed: %v", err)
+		}
+		return
 	}
 
-	log.Printf("Starting server on %s with IP_MODE=%s", addr, ipMode)
-
-	var listener net.Listener
-	var err error
-	if ipMode == "ipv4" {
-		listener, err = net.Listen("tcp4", addr)
-	} else if ipMode == "ipv6" {
-		listener, err = net.Listen("tcp6", addr)
-	} else {
-		listener, err = net.Listen("tcp", addr)
-	}
+	listener, err = net.Listen(network, addr)
 	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", addr, err)
+		log.Fatalf("failed to start %s listener on %s: %v", network, addr, err)
 	}
-
-	if err := http.Serve(listener, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("Server failed: %v", err)
+	log.Printf("Starting server on %s with IP_MODE=%s", addr, ipMode)
+	if err = http.Serve(listener, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("server failed: %v", err)
 	}
 }
