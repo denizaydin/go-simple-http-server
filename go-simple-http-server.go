@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -22,6 +23,11 @@ type HopInfo struct {
 	RequestURL      string              `json:"request_url"`
 	IncomingHeaders map[string][]string `json:"incoming_headers"`
 	Timestamp       string              `json:"ts"`
+}
+type DownstreamError struct {
+	Error      string `json:"error"`
+	StatusCode int    `json:"statusCode,omitempty"`
+	Body       string `json:"body,omitempty"`
 }
 
 func getenv(key, def string) string {
@@ -102,22 +108,39 @@ func callDownstream(ctx context.Context, target string) ([]HopInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
+
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("downstream call failed: %w", err)
+		errResp := DownstreamError{
+			Error:      fmt.Sprintf("downstream call failed: %v", err),
+			StatusCode: 0,
+		}
+		jsonErr, _ := json.Marshal(errResp)
+		return nil, fmt.Errorf("%s", jsonErr)
 	}
 	defer resp.Body.Close()
 
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 5120))
+	bodyStr := strings.TrimSpace(string(bodyBytes))
+
 	var chain []HopInfo
-	if err := json.NewDecoder(resp.Body).Decode(&chain); err == nil {
+	if err := json.Unmarshal(bodyBytes, &chain); err == nil {
 		return chain, nil
 	}
-	return nil, errors.New("downstream returned non-JSON or unexpected shape")
+
+	errResp := DownstreamError{
+		Error:      "downstream returned non-JSON or unexpected shape",
+		StatusCode: resp.StatusCode,
+		Body:       bodyStr,
+	}
+	jsonErr, _ := json.Marshal(errResp)
+	return nil, fmt.Errorf("%s", jsonErr)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
